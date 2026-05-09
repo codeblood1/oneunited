@@ -3,16 +3,13 @@
 -- Paste this entire file into Supabase SQL Editor, then click "Run"
 -- ===================================================================
 
--- Enable Row Level Security (best practice)
-ALTER DATABASE postgres SET "app.jwt_secret" TO '';
-
 -- ===================================================================
--- Table: users
+-- Table: users (linked to Supabase Auth via supabase_uid)
 -- ===================================================================
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
-    "unionId" VARCHAR(255) NOT NULL UNIQUE,
-    email VARCHAR(320),
+    supabase_uid UUID NOT NULL UNIQUE,
+    email VARCHAR(320) NOT NULL,
     name VARCHAR(255),
     phone VARCHAR(50),
     avatar TEXT,
@@ -37,6 +34,19 @@ $$ language 'plpgsql';
 
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ===================================================================
+-- Table: admin_users (managed from Supabase dashboard)
+-- ===================================================================
+CREATE TABLE IF NOT EXISTS admin_users (
+    id SERIAL PRIMARY KEY,
+    supabase_uid UUID NOT NULL UNIQUE,
+    email VARCHAR(320),
+    name VARCHAR(255),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- ===================================================================
 -- Table: bank_accounts
@@ -97,6 +107,8 @@ CREATE TABLE IF NOT EXISTS kyc_submissions (
 -- ===================================================================
 -- Indexes (for performance)
 -- ===================================================================
+CREATE INDEX IF NOT EXISTS idx_users_supabase_uid ON users(supabase_uid);
+CREATE INDEX IF NOT EXISTS idx_admin_users_supabase_uid ON admin_users(supabase_uid);
 CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
 CREATE INDEX IF NOT EXISTS idx_transactions_from_account ON transactions(from_account_id);
@@ -109,22 +121,24 @@ CREATE INDEX IF NOT EXISTS idx_kyc_status ON kyc_submissions(status);
 -- Seed Data (Optional — for testing)
 -- ===================================================================
 
--- Admin user
-INSERT INTO users ("unionId", email, name, role, kyc_status, is_active)
-VALUES ('admin_001', 'admin@oneunited.bank', 'Admin User', 'admin', 'verified', true)
-ON CONFLICT ("unionId") DO NOTHING;
+-- Placeholder admin (replace with your real supabase_uid after signup)
+INSERT INTO admin_users (supabase_uid, email, name, is_active)
+VALUES ('00000000-0000-0000-0000-000000000000', 'admin@oneunited.bank', 'Admin User', true)
+ON CONFLICT (supabase_uid) DO NOTHING;
 
--- Demo user
-INSERT INTO users ("unionId", email, name, role, kyc_status, is_active)
-VALUES ('user_001', 'demo@example.com', 'Demo User', 'user', 'verified', true)
-ON CONFLICT ("unionId") DO NOTHING;
+-- Placeholder users
+INSERT INTO users (supabase_uid, email, name, role, kyc_status, is_active)
+VALUES 
+    ('00000000-0000-0000-0000-000000000000', 'admin@oneunited.bank', 'Admin User', 'user', 'verified', true),
+    ('11111111-1111-1111-1111-111111111111', 'demo@example.com', 'Demo User', 'user', 'verified', true)
+ON CONFLICT (supabase_uid) DO NOTHING;
 
 -- Create demo accounts
 DO $$
 DECLARE
     demo_user_id INTEGER;
 BEGIN
-    SELECT id INTO demo_user_id FROM users WHERE "unionId" = 'user_001';
+    SELECT id INTO demo_user_id FROM users WHERE supabase_uid = '11111111-1111-1111-1111-111111111111';
     
     IF demo_user_id IS NOT NULL THEN
         INSERT INTO bank_accounts (user_id, account_number, account_type, balance, currency)
@@ -141,7 +155,7 @@ DECLARE
     demo_user_id INTEGER;
     checking_id INTEGER;
 BEGIN
-    SELECT id INTO demo_user_id FROM users WHERE "unionId" = 'user_001';
+    SELECT id INTO demo_user_id FROM users WHERE supabase_uid = '11111111-1111-1111-1111-111111111111';
     SELECT id INTO checking_id FROM bank_accounts WHERE user_id = demo_user_id AND account_type = 'checking' LIMIT 1;
     
     IF demo_user_id IS NOT NULL AND checking_id IS NOT NULL THEN
@@ -160,11 +174,12 @@ END $$;
 -- Enable Row Level Security on all tables
 -- ===================================================================
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bank_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kyc_submissions ENABLE ROW LEVEL SECURITY;
 
--- Create policies for authenticated users (modify as needed)
+-- Create policies
 CREATE POLICY "Users can read own data" ON users
     FOR SELECT USING (true);
 
