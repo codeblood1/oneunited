@@ -24,22 +24,13 @@ export function useAuth() {
   // Fetch user profile from database
   const loadUserProfile = useCallback(async (supabaseUid: string): Promise<AuthUser | null> => {
     try {
-      // Try to find user profile
       const { data: userRow, error: userError } = await supabase
         .from("users")
         .select("*")
         .eq("supabase_uid", supabaseUid)
         .maybeSingle();
 
-      if (userError) {
-        console.error("[Auth] Error loading user profile:", userError.message);
-        return null;
-      }
-
-      // If no profile exists, we need to create one
-      if (!userRow) {
-        return null;
-      }
+      if (userError || !userRow) return null;
 
       // Check admin status
       const { data: adminRow } = await supabase
@@ -61,8 +52,7 @@ export function useAuth() {
         isAdmin: !!adminRow,
         createdAt: userRow.created_at,
       };
-    } catch (err) {
-      console.error("[Auth] loadUserProfile error:", err);
+    } catch {
       return null;
     }
   }, []);
@@ -87,49 +77,41 @@ export function useAuth() {
         .single();
 
       if (insertError) {
-        console.error("[Auth] Profile insert error:", insertError.message, insertError.details);
+        console.error("[Auth] Profile insert error:", insertError.message);
         return null;
       }
-
       return inserted;
-    } catch (err) {
-      console.error("[Auth] createUserProfile error:", err);
+    } catch {
       return null;
     }
   }, []);
 
-  // Main auth state sync
+  // Main auth state sync - runs once on mount
   useEffect(() => {
     let mounted = true;
+    let listener: { subscription: { unsubscribe: () => void } } | null = null;
 
     const syncUser = async () => {
+      // When not configured, just stop loading immediately
       if (!isConfigured) {
-        setIsLoading(false);
+        if (mounted) setIsLoading(false);
         return;
       }
 
-      setIsLoading(true);
       try {
         const { data: { session } } = await supabase.auth.getSession();
 
         if (session?.user) {
           let profile = await loadUserProfile(session.user.id);
-
-          // Auto-create profile if missing
           if (!profile) {
-            console.log("[Auth] Profile not found, auto-creating...");
             const newProfile = await createUserProfile(session.user);
-            if (newProfile) {
-              profile = await loadUserProfile(session.user.id);
-            }
+            if (newProfile) profile = await loadUserProfile(session.user.id);
           }
-
           if (mounted) setUser(profile);
         } else {
           if (mounted) setUser(null);
         }
-      } catch (err) {
-        console.error("[Auth] syncUser error:", err);
+      } catch {
         if (mounted) setUser(null);
       } finally {
         if (mounted) setIsLoading(false);
@@ -138,27 +120,26 @@ export function useAuth() {
 
     syncUser();
 
-    if (!isConfigured) return;
-
-    // Listen for auth changes
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        let profile = await loadUserProfile(session.user.id);
-
-        if (!profile) {
-          await createUserProfile(session.user);
-          profile = await loadUserProfile(session.user.id);
+    // Only set up listener when configured
+    if (isConfigured) {
+      supabase.auth.onAuthStateChange(async (_event, session) => {
+        if (!mounted) return;
+        if (session?.user) {
+          let profile = await loadUserProfile(session.user.id);
+          if (!profile) {
+            await createUserProfile(session.user);
+            profile = await loadUserProfile(session.user.id);
+          }
+          if (mounted) setUser(profile);
+        } else {
+          if (mounted) setUser(null);
         }
-
-        if (mounted) setUser(profile);
-      } else {
-        if (mounted) setUser(null);
-      }
-    });
+      });
+    }
 
     return () => {
       mounted = false;
-      listener.subscription.unsubscribe();
+      if (listener) listener.subscription.unsubscribe();
     };
   }, [loadUserProfile, createUserProfile]);
 
@@ -168,34 +149,20 @@ export function useAuth() {
     setIsLoading(true);
 
     try {
-      // 1. Create in Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
-        options: {
-          data: { name: name || email.split("@")[0] },
-        },
+        options: { data: { name: name || email.split("@")[0] } },
       });
 
       if (authError) throw new Error(authError.message);
       if (!authData.user) throw new Error("Signup failed");
 
-      // 2. Create profile in our users table
-      const newProfile = await createUserProfile(authData.user);
+      await createUserProfile(authData.user);
 
-      if (!newProfile) {
-        console.warn("[Auth] Profile creation deferred — will retry on sign-in");
-      }
-
-      // 3. Auto sign in
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
       if (signInError) throw new Error(signInError.message);
 
-      // 4. Load profile
       if (signInData.user) {
         let profile = await loadUserProfile(signInData.user.id);
         if (!profile) {
@@ -207,7 +174,6 @@ export function useAuth() {
 
       return { success: true, error: null };
     } catch (err: any) {
-      console.error("[Auth] Sign up error:", err);
       return { success: false, error: err.message || "Sign up failed" };
     } finally {
       setIsLoading(false);
@@ -220,26 +186,18 @@ export function useAuth() {
     setIsLoading(true);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw new Error(error.message);
       if (!data.user) throw new Error("Login failed");
 
-      // Ensure user profile exists
       let profile = await loadUserProfile(data.user.id);
       if (!profile) {
-        console.log("[Auth] Profile missing, auto-creating on sign-in...");
         await createUserProfile(data.user);
         profile = await loadUserProfile(data.user.id);
       }
-
       setUser(profile);
       return { success: true, error: null };
     } catch (err: any) {
-      console.error("[Auth] Sign in error:", err);
       return { success: false, error: err.message || "Sign in failed" };
     } finally {
       setIsLoading(false);

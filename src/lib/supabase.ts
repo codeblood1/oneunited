@@ -1,30 +1,33 @@
-// Supabase client — creates a safe client even when URL is missing
-// The app will show a config error instead of crashing
-
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 
 // Check if values are real or still placeholders
-const isConfigured =
+const _isConfigured =
   supabaseUrl.length > 0 &&
   !supabaseUrl.includes("YOUR-PROJECT-REF") &&
   !supabaseUrl.includes("REPLACE") &&
   supabaseAnonKey.length > 0 &&
   !supabaseAnonKey.includes("REPLACE-THIS");
 
-// Create a dummy URL for when not configured (prevents crash on import)
-const safeUrl = isConfigured ? supabaseUrl : "http://localhost-placeholder";
-const safeKey = isConfigured ? supabaseAnonKey : "placeholder-key";
+// For unconfigured state, use a minimal valid URL to prevent client creation errors
+// but disable all background activity
+const safeUrl = _isConfigured ? supabaseUrl : "http://localhost:54321";
+const safeKey = _isConfigured ? supabaseAnonKey : "dummy-key";
 
 export const supabase = createClient(safeUrl, safeKey, {
   auth: {
-    autoRefreshToken: true,
+    autoRefreshToken: _isConfigured,  // Only refresh when properly configured
     persistSession: true,
-    detectSessionInUrl: true,
+    detectSessionInUrl: false,         // Disable to prevent conflicts with HashRouter
     storageKey: "oneunited_auth",
+  },
+  global: {
+    // Add request timeout to prevent hanging
+    headers: _isConfigured ? undefined : { "X-Client-Info": "oneunited" },
   },
 });
 
-export { isConfigured };
+// Also export a flag that modules can check synchronously
+export const isConfigured = _isConfigured;

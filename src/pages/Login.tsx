@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
@@ -9,7 +9,7 @@ import {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { signIn, signUp, user, isLoading: authLoading, configError } = useAuth();
+  const { signIn, signUp, user, configError } = useAuth();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
@@ -17,28 +17,18 @@ export default function Login() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const didRedirect = useRef(false);
 
-  // Redirect when user becomes authenticated
+  // Only redirect if actually authenticated - with guard to prevent loops
   useEffect(() => {
-    if (user && !authLoading) {
+    if (user && !didRedirect.current) {
+      didRedirect.current = true;
       const dest = user.isAdmin ? "/admin" : "/dashboard";
-      navigate(dest);
+      navigate(dest, { replace: true });
     }
-  }, [user, authLoading, navigate]);
+  }, [user, navigate]);
 
-  // Show loading state while auth is being checked
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
-          <p className="text-sm text-slate-500 dark:text-slate-400">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Already authenticated - show redirecting state
+  // If already authenticated, don't render the form at all
   if (user) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
@@ -52,19 +42,14 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     if (submitting) return;
-
     setError("");
     setSubmitting(true);
 
     try {
       if (mode === "signin") {
         const result = await signIn(email, password);
-        if (result.error) {
-          setError(result.error);
-        }
-        // Redirect handled by useEffect when user state updates
+        if (result.error) setError(result.error);
       } else {
         if (password.length < 6) {
           setError("Password must be at least 6 characters");
@@ -72,10 +57,7 @@ export default function Login() {
           return;
         }
         const result = await signUp(email, password, name || undefined);
-        if (result.error) {
-          setError(result.error);
-        }
-        // Redirect handled by useEffect when user state updates
+        if (result.error) setError(result.error);
       }
     } catch (err: any) {
       setError(err.message || "An unexpected error occurred");
@@ -129,17 +111,17 @@ export default function Login() {
             </p>
           </CardHeader>
           <CardContent className="space-y-5 pt-4">
-            {/* Toggle buttons - MUST be outside the form */}
+            {/* Toggle - OUTSIDE the form to prevent submit */}
             <div className="flex rounded-xl bg-slate-100 dark:bg-slate-700 p-1">
               <button
                 type="button"
-                onClick={() => { if (!submitting) { setMode("signin"); setError(""); } }}
+                onClick={() => { setMode("signin"); setError(""); }}
                 className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${mode === "signin" ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"}`}>
                 Sign In
               </button>
               <button
                 type="button"
-                onClick={() => { if (!submitting) { setMode("signup"); setError(""); } }}
+                onClick={() => { setMode("signup"); setError(""); }}
                 className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${mode === "signup" ? "bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"}`}>
                 Sign Up
               </button>
