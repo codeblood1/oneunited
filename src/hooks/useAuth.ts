@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/lib/supabase";
-import { trpc } from "@/providers/trpc";
+import { supabase, isConfigured } from "@/lib/supabase";
 
 type AuthUser = {
   id: number;
@@ -11,84 +10,151 @@ type AuthUser = {
   role: string;
   kycStatus: string;
   isActive: boolean;
-  createdAt: Date;
+  isAdmin: boolean;
+  createdAt: string;
 };
 
 export function useAuth() {
-  const utils = trpc.useUtils();
-  const [hasSession, setHasSession] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [configError, setConfigError] = useState<string>(
+    isConfigured ? "" : "Supabase not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
+  );
 
-  // Listen to Supabase auth state
   useEffect(() => {
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setHasSession(!!session);
+    let mounted = true;
+
+    const syncUser = async () => {
+      if (!isConfigured) {
+        if (mounted) setIsLoading(false);
+        return;
+      }
+      setIsLoading(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          await refreshUserProfile(session.user.id);
+        } else {
+          if (mounted) setUser(null);
+        }
+      } catch {
+        if (mounted) setUser(null);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    };
+
+    syncUser();
+
+    if (!isConfigured) return;
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        await refreshUserProfile(session.user.id);
+      } else {
+        if (mounted) setUser(null);
+      }
     });
-    // Check initial session
-    supabase.auth.getSession().then(({ data }) => {
-      setHasSession(!!data.session);
-    });
-    return () => listener.subscription.unsubscribe();
+
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
-  // Fetch user profile from our backend
-  const {
-    data: userData,
-    isLoading: userLoading,
-    error: userError,
-  } = trpc.auth.me.useQuery(undefined, {
-    staleTime: 1000 * 60 * 5,
-    retry: false,
-    enabled: hasSession,
-  });
+  const refreshUserProfile = async (supabaseUid: string) => {
+    try {
+      const { data: userRow } = await supabase
+        .from("users")
+        .select("*")
+        .eq("supabase_uid", supabaseUid)
+        .single();
 
-  // Sign up mutation
-  const signUpMutation = trpc.auth.signUp.useMutation({
-    onSuccess: (data) => {
-      if (data.token) {
-        supabase.auth.setSession({
-          access_token: data.token,
-          refresh_token: data.refreshToken,
-        });
-      }
-      utils.invalidate();
-    },
-  });
+      if (!userRow) { setUser(null); return; }
 
-  // Sign in mutation
-  const signInMutation = trpc.auth.signIn.useMutation({
-    onSuccess: (data) => {
-      if (data.token) {
-        supabase.auth.setSession({
-          access_token: data.token,
-          refresh_token: data.refreshToken,
-        });
-      }
-      utils.invalidate();
-    },
-  });
+      const { data: adminRow } = await supabase
+        .from("admin_users")
+        .select("*")
+        .eq("supabase_uid", supabaseUid)
+        .eq("is_active", true)
+        .maybeSingle();
 
-  // Logout
-  const logout = useCallback(async () => {
-    await supabase.auth.signOut();
-    utils.invalidate();
-    window.location.href = "/login";
-  }, [utils]);
-
-  const user = userData as AuthUser | null | undefined;
-  const isLoading = userLoading || signUpMutation.isPending || signInMutation.isPending;
-
-  return {
-    user: user ?? null,
-    isAuthenticated: !!user,
-    isAdmin: user?.role === "admin" || user?.role === "manager",
-    isLoading,
-    error: userError,
-    signUp: signUpMutation.mutate,
-    signIn: signInMutation.mutate,
-    signUpPending: signUpMutation.isPending,
-    signInPending: signInMutation.isPending,
-    signUpError: signUpMutation.error,
-    signInError: signInMutation.error,
-    logout,
+      setUser({
+        id: userRow.id,
+        supabaseUid: userRow.supabase_uid,
+        name: userRow.name,
+        email: userRow.email,
+        avatar: userRow.avatar,
+        role: adminRow ? "admin" : userRow.role,
+        kycStatus: userRow.kyc_status,
+        isActive: userRow.is_active,
+        isAdmin: !!adminRow,
+        createdAt: userRow.created_at,
+      });
+    } catch {
+      setUser(null);
+    }
   };
+
+  const signUp = useCallback(async (email: string, password: string, name?: string) => {
+    if (!isConfigured) return { success: false, error: "Supabase not configured" };
+    setIsLoading(true); setConfigError("");
+    try {
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email, password,
+        options: { data: { name: name || email.split("@")[0] } },
+      });
+      if (authError) throw new Error(authError.message);
+      if (!authData.user) throw new Error("Signup failed");
+
+      await supabase.from("users").insert({
+        supabase_uid: authData.user.id,
+        email, name: name || email.split("@")[0],
+        role: "user", kyc_status: "unverified", is_active: true,
+      });
+
+      await supabase.auth.signInWithPassword({ email, password });
+      await refreshUserProfile(authData.user.id);
+      return { success: true, error: null };
+    } catch (err: any) {
+      return { success: false, error: err.message || "Sign up failed" };
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    if (!isConfigured) return { success: false, error: "Supabase not configured" };
+    setIsLoading(true); setConfigError("");
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw new Error(error.message);
+      if (!data.user) throw new Error("Login failed");
+
+      const { data: existingUser } = await supabase
+        .from("users").select("*").eq("supabase_uid", data.user.id).maybeSingle();
+
+      if (!existingUser) {
+        await supabase.from("users").insert({
+          supabase_uid: data.user.id, email,
+          name: data.user.user_metadata?.name || email.split("@")[0],
+          role: "user", kyc_status: "unverified", is_active: true,
+        });
+      }
+      await refreshUserProfile(data.user.id);
+      return { success: true, error: null };
+    } catch (err: any) {
+      return { success: false, error: err.message || "Sign in failed" };
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    if (isConfigured) await supabase.auth.signOut();
+    setUser(null);
+    window.location.reload();
+  }, []);
+
+  return { user, isAuthenticated: !!user, isAdmin: user?.isAdmin || false, isLoading, configError, signUp, signIn, logout };
 }

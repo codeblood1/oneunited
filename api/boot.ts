@@ -1,17 +1,19 @@
-import { createServer } from "node:http";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import type { HttpBindings } from "@hono/node-server";
+import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env } from "./lib/env";
 
+// ============================================================
+// Create Hono app
+// ============================================================
 const app = new Hono<{ Bindings: HttpBindings }>();
 
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 
-// tRPC endpoint
+// tRPC endpoint — handles ALL API requests
 app.use("/api/trpc/*", async (c) => {
   return fetchRequestHandler({
     endpoint: "/api/trpc",
@@ -27,18 +29,21 @@ app.use("/api/trpc/*", async (c) => {
 // Health check
 app.get("/api/health", (c) => c.json({ ok: true, ts: Date.now() }));
 
-const server = createServer(async (req, res) => {
-  const response = await app.fetch(req as unknown as Request, {
-    req,
-    res,
-  } as any);
-  (res as any).webResponse = response;
-});
+// 404 for unmatched API routes
+app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
-const PORT = Number(process.env.PORT || 3000);
+// ============================================================
+// Production: Serve static files + start Node.js server
+// ============================================================
+if (env.isProduction) {
+  const { serve } = await import("@hono/node-server");
+  const { serveStaticFiles } = await import("./lib/vite");
+  serveStaticFiles(app);
 
-server.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
-});
+  const PORT = Number(process.env.PORT || 3000);
+  serve({ fetch: app.fetch, port: PORT }, (info) => {
+    console.log(`Server running at http://localhost:${info.port}`);
+  });
+}
 
-export { app };
+export default app;

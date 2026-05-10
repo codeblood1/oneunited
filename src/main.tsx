@@ -1,12 +1,12 @@
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router'
+import { HashRouter } from 'react-router'
 import { Toaster } from 'sonner'
 import './index.css'
 import { TRPCProvider } from "@/providers/trpc"
 import App from './App.tsx'
 
 createRoot(document.getElementById('root')!).render(
-  <BrowserRouter>
+  <HashRouter>
     <TRPCProvider>
       <Toaster 
         position="top-right"
@@ -20,5 +20,5 @@ createRoot(document.getElementById('root')!).render(
       />
       <App />
     </TRPCProvider>
-  </BrowserRouter>,
+  </HashRouter>,
 )
