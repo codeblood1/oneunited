@@ -1,5 +1,4 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -8,8 +7,7 @@ import {
 } from "lucide-react";
 
 export default function Login() {
-  const navigate = useNavigate();
-  const { signIn, signUp, user, isLoading, configError } = useAuth();
+  const { signIn, signUp, user, configError } = useAuth();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
@@ -18,12 +16,17 @@ export default function Login() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // Redirect when logged in
-  useEffect(() => {
-    if (user) {
-      navigate(user.isAdmin ? "/admin" : "/dashboard", { replace: true });
-    }
-  }, [user, navigate]);
+  // If authenticated, show redirecting (App.tsx will handle the actual redirect)
+  if (user) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+          <p className="text-sm text-slate-500 dark:text-slate-400">Redirecting...</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,7 +54,6 @@ export default function Login() {
           <span className="text-2xl font-bold text-slate-900 dark:text-white">OneUnited</span>
         </div>
 
-        {/* Config warning */}
         {configError && (
           <div className="mb-4 p-4 rounded-2xl bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800">
             <div className="flex items-start gap-3">
@@ -135,7 +137,7 @@ export default function Login() {
                 </div>
               </div>
 
-              <button type="submit" disabled={busy || isLoading}
+              <button type="submit" disabled={busy}
                 className="w-full bg-[#fbbf24] hover:bg-amber-500 disabled:opacity-60 text-slate-900 font-semibold rounded-xl h-12 text-base shadow-md flex items-center justify-center gap-2 transition-all">
                 {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowRight className="w-5 h-5" />}
                 {mode === "signin" ? "Sign In" : "Create Account"}

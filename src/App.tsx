@@ -16,37 +16,37 @@ import AdminKYC from "./pages/AdminKYC";
 import AdminAccounts from "./pages/AdminAccounts";
 import NotFound from "./pages/NotFound";
 
+function AuthLoader() {
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-[#fbbf24] border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-slate-500 dark:text-slate-400">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
 function ProtectedRoute({ children, adminOnly }: { children: React.ReactNode; adminOnly?: boolean }) {
   const { user, isAdmin, isLoading } = useAuth();
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-        <Loader />
-      </div>
-    );
-  }
-
+  if (isLoading) return <AuthLoader />;
   if (!user) return <Navigate to="/login" replace />;
   if (adminOnly && !isAdmin) return <Navigate to="/dashboard" replace />;
-
   return <Layout>{children}</Layout>;
 }
 
-function Loader() {
-  return (
-    <div className="flex flex-col items-center gap-3">
-      <div className="w-8 h-8 border-2 border-[#fbbf24] border-t-transparent rounded-full animate-spin" />
-      <p className="text-sm text-slate-500 dark:text-slate-400">Loading...</p>
-    </div>
-  );
+function LoginRoute() {
+  const { user, isLoading } = useAuth();
+  if (isLoading) return <AuthLoader />;
+  if (user) return <Navigate to={user.isAdmin ? "/admin" : "/dashboard"} replace />;
+  return <Login />;
 }
 
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
-      <Route path="/login" element={<Login />} />
+      <Route path="/login" element={<LoginRoute />} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/accounts" element={<ProtectedRoute><Accounts /></ProtectedRoute>} />
       <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />

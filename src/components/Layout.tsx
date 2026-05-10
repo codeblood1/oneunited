@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
+import { Link, useLocation } from "react-router";
 import { useAuth } from "@/hooks/useAuth";
 import {
   LayoutDashboard, Wallet, ArrowLeftRight, ShieldCheck, Settings,
@@ -39,9 +39,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  useEffect(() => { if (!user) { navigate("/login"); } }, [user, navigate]);
-
-  if (!user) return null;
+  // Layout only renders when user exists (ProtectedRoute guards this)
+  // No navigate() here — all redirects are handled in App.tsx
 
   const isAdminRoute = location.pathname.startsWith("/admin");
   const navItems = isAdminRoute ? adminNavItems : userNavItems;
