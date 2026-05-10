@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,8 +18,14 @@ export default function Login() {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
 
+  // Redirect to dashboard if already authenticated
+  useEffect(() => {
+    if (isAuthenticated && !isLoading) {
+      navigate("/dashboard");
+    }
+  }, [isAuthenticated, isLoading, navigate]);
+
   if (isAuthenticated && !isLoading) {
-    navigate("/dashboard");
     return null;
   }
 
@@ -83,11 +89,11 @@ export default function Login() {
           </CardHeader>
           <CardContent className="space-y-5 pt-4">
             <div className="flex rounded-xl bg-slate-100 p-1">
-              <button onClick={() => { setMode("signin"); setError(""); }}
+              <button type="button" onClick={() => { setMode("signin"); setError(""); }}
                 className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${mode === "signin" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
                 Sign In
               </button>
-              <button onClick={() => { setMode("signup"); setError(""); }}
+              <button type="button" onClick={() => { setMode("signup"); setError(""); }}
                 className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${mode === "signup" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
                 Sign Up
               </button>
