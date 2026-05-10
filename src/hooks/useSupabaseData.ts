@@ -502,3 +502,208 @@ export function useNotifications() {
 
   return { notifications, isLoading, unreadCount, markAsRead, markAllRead, refresh: fetchNotifications };
 }
+
+// ============================================================
+// ADMIN HOOKS — Direct Supabase (no tRPC)
+// ============================================================
+
+export type AdminUser = {
+  id: number;
+  supabase_uid: string;
+  name: string | null;
+  email: string | null;
+  role: string;
+  kyc_status: string;
+  is_active: boolean;
+  created_at: string;
+};
+
+export type AdminTransaction = Transaction & { user_id: number };
+
+export type AdminKycItem = {
+  id: number;
+  user_id: number;
+  id_type: string;
+  id_number: string;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip_code: string | null;
+  country: string | null;
+  id_front_image: string | null;
+  id_back_image: string | null;
+  status: string;
+  admin_note: string | null;
+  submitted_at: string;
+};
+
+export type AdminAccount = {
+  id: number;
+  user_id: number;
+  account_number: string;
+  account_type: string;
+  balance: string;
+  currency: string;
+  bank_name: string | null;
+  bank_country: string | null;
+  swift_code: string | null;
+  is_active: boolean;
+  created_at: string;
+};
+
+export type AdminStats = {
+  totalUsers: number;
+  totalAccounts: number;
+  totalTransactions: number;
+  pendingTransactions: number;
+  pendingKyc: number;
+  totalBalance: number;
+};
+
+export function useAdminStats() {
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchStats = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      // Get counts in parallel
+      const [{ count: totalUsers }, { count: totalAccounts }, { count: totalTransactions },
+             { count: pendingTransactions }, { count: pendingKyc }, { data: accounts }] = await Promise.all([
+        supabase.from("users").select("*", { count: "exact", head: true }),
+        supabase.from("bank_accounts").select("*", { count: "exact", head: true }),
+        supabase.from("transactions").select("*", { count: "exact", head: true }),
+        supabase.from("transactions").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("kyc_submissions").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("bank_accounts").select("balance"),
+      ]);
+
+      const totalBalance = (accounts || []).reduce((sum, a) => sum + (parseFloat(a.balance as string) || 0), 0);
+
+      setStats({
+        totalUsers: totalUsers || 0,
+        totalAccounts: totalAccounts || 0,
+        totalTransactions: totalTransactions || 0,
+        pendingTransactions: pendingTransactions || 0,
+        pendingKyc: pendingKyc || 0,
+        totalBalance,
+      });
+    } catch {
+      setStats(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchStats(); }, [fetchStats]);
+  return { stats, isLoading, refresh: fetchStats };
+}
+
+export function useAdminUsers() {
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchUsers = useCallback(async (search?: string, role?: string, limit = 20, offset = 0) => {
+    setIsLoading(true);
+    try {
+      let query = supabase.from("users").select("*").order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+      if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
+      if (role) query = query.eq("role", role);
+      const { data, error: err } = await query;
+      if (err) throw err;
+      setUsers(data || []);
+    } catch {
+      setUsers([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const updateUser = useCallback(async (userId: number, updates: { role?: string; isActive?: boolean }) => {
+    const { error: err } = await supabase.from("users").update(updates).eq("id", userId);
+    if (err) throw new Error(err.message);
+  }, []);
+
+  return { users, isLoading, fetchUsers, updateUser };
+}
+
+export function useAdminTransactions() {
+  const [transactions, setTransactions] = useState<AdminTransaction[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchTransactions = useCallback(async (status?: string, limit = 100) => {
+    setIsLoading(true);
+    try {
+      let query = supabase.from("transactions").select("*").order("created_at", { ascending: false }).limit(limit);
+      if (status && status !== "all") query = query.eq("status", status);
+      const { data, error: err } = await query;
+      if (err) throw err;
+      setTransactions(data || []);
+    } catch {
+      setTransactions([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const updateStatus = useCallback(async (txId: number, status: string) => {
+    const { error: err } = await supabase.from("transactions").update({ status }).eq("id", txId);
+    if (err) throw new Error(err.message);
+  }, []);
+
+  return { transactions, isLoading, fetchTransactions, updateStatus };
+}
+
+export function useAdminKyc() {
+  const [kycList, setKycList] = useState<AdminKycItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchKyc = useCallback(async (status?: string, limit = 100) => {
+    setIsLoading(true);
+    try {
+      let query = supabase.from("kyc_submissions").select("*").order("submitted_at", { ascending: false }).limit(limit);
+      if (status && status !== "all") query = query.eq("status", status);
+      const { data, error: err } = await query;
+      if (err) throw err;
+      setKycList(data || []);
+    } catch {
+      setKycList([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const updateKyc = useCallback(async (kycId: number, status: string, adminNote?: string) => {
+    const { error: err } = await supabase.from("kyc_submissions").update({ status, admin_note: adminNote || null, reviewed_at: new Date().toISOString() }).eq("id", kycId);
+    if (err) throw new Error(err.message);
+
+    // Update user's kyc_status
+    const { data: kycRow } = await supabase.from("kyc_submissions").select("user_id").eq("id", kycId).single();
+    if (kycRow) {
+      const kycStatus = status === "approved" ? "verified" : "rejected";
+      await supabase.from("users").update({ kyc_status: kycStatus }).eq("id", kycRow.user_id);
+    }
+  }, []);
+
+  return { kycList, isLoading, fetchKyc, updateKyc };
+}
+
+export function useAdminAccounts() {
+  const [accounts, setAccounts] = useState<AdminAccount[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchAccounts = useCallback(async (limit = 100) => {
+    setIsLoading(true);
+    try {
+      const { data, error: err } = await supabase.from("bank_accounts").select("*").order("created_at", { ascending: false }).limit(limit);
+      if (err) throw err;
+      setAccounts(data || []);
+    } catch {
+      setAccounts([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  return { accounts, isLoading, fetchAccounts };
+}
