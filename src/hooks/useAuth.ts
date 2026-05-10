@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase, isConfigured } from "@/lib/supabase";
 
 type AuthUser = {
@@ -14,143 +14,187 @@ type AuthUser = {
   createdAt: string;
 };
 
-// Build a user object from DB row + admin check
-function buildUser(row: Record<string, any>, isAdmin: boolean): AuthUser {
+// ======== MODULE-LEVEL SHARED STATE ========
+// All hook instances share this state via subscriptions
+let _user: AuthUser | null = null;
+let _loading = true;
+const _listeners = new Set<(u: AuthUser | null, l: boolean) => void>();
+
+function _setUser(user: AuthUser | null) {
+  _user = user;
+  _listeners.forEach((fn) => fn(_user, _loading));
+}
+
+function _setLoading(loading: boolean) {
+  _loading = loading;
+  _listeners.forEach((fn) => fn(_user, _loading));
+}
+
+function _notify() {
+  _listeners.forEach((fn) => fn(_user, _loading));
+}
+
+// Build user from DB rows
+async function loadProfile(sbUid: string): Promise<AuthUser | null> {
+  const [{ data: row }, { data: adminRow }] = await Promise.all([
+    supabase.from("users").select("*").eq("supabase_uid", sbUid).maybeSingle(),
+    supabase.from("admin_users").select("id").eq("supabase_uid", sbUid).eq("is_active", true).maybeSingle(),
+  ]);
+
+  if (!row) return null;
+
   return {
     id: row.id,
     supabaseUid: row.supabase_uid,
     name: row.name,
     email: row.email,
     avatar: row.avatar,
-    role: isAdmin ? "admin" : row.role,
+    role: adminRow ? "admin" : row.role,
     kycStatus: row.kyc_status,
     isActive: row.is_active,
-    isAdmin,
+    isAdmin: !!adminRow,
     createdAt: row.created_at,
   };
 }
 
+// Sync from Supabase session — updates shared state
+async function syncFromSession() {
+  if (!isConfigured) {
+    _setLoading(false);
+    return;
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const uid = session?.user?.id;
+
+  if (uid) {
+    const profile = await loadProfile(uid);
+    _setUser(profile);
+  } else {
+    _setUser(null);
+  }
+  _setLoading(false);
+}
+
+// Initialize once on module load
+let initialized = false;
+function init() {
+  if (initialized) return;
+  initialized = true;
+
+  if (!isConfigured) {
+    _setLoading(false);
+    return;
+  }
+
+  syncFromSession();
+}
+
+// ======== REACT HOOK ========
 export function useAuth() {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  // Use ref to track the current supabase auth user to avoid stale closures
-  const sessionRef = useRef<string | null>(null);
+  // Subscribe to shared module state
+  const [, setTick] = useState(0);
 
-  const fetchProfile = useCallback(async (sbUid: string): Promise<AuthUser | null> => {
-    const [{ data: row, error: rowErr }, { data: adminRow }] = await Promise.all([
-      supabase.from("users").select("*").eq("supabase_uid", sbUid).maybeSingle(),
-      supabase.from("admin_users").select("id").eq("supabase_uid", sbUid).eq("is_active", true).maybeSingle(),
-    ]);
+  useEffect(() => {
+    init();
 
-    if (rowErr || !row) return null;
-    return buildUser(row, !!adminRow);
+    const onChange = () => setTick((t) => t + 1);
+    _listeners.add(onChange);
+    return () => {
+      _listeners.delete(onChange);
+    };
   }, []);
 
-  // Single source of truth for setting auth state
-  const syncAuth = useCallback(async () => {
-    if (!isConfigured) {
-      setIsLoading(false);
-      return;
+  const signIn = useCallback(async (email: string, password: string) => {
+    if (!isConfigured) return { error: "Supabase not configured" };
+    _setLoading(true);
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      _setLoading(false);
+      return { error: error.message };
+    }
+    if (!data.user) {
+      _setLoading(false);
+      return { error: "Login failed" };
     }
 
-    const { data: { session } } = await supabase.auth.getSession();
-    const uid = session?.user?.id ?? null;
-
-    if (uid) {
-      const profile = await fetchProfile(uid);
-      sessionRef.current = uid;
-      setUser(profile);
-    } else {
-      sessionRef.current = null;
-      setUser(null);
-    }
-    setIsLoading(false);
-  }, [fetchProfile]);
-
-  // Check session on mount only
-  useEffect(() => {
-    syncAuth();
-  }, [syncAuth]);
-
-  const signIn = useCallback(
-    async (email: string, password: string) => {
-      if (!isConfigured) return { error: "Supabase not configured" };
-
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) return { error: error.message };
-      if (!data.user) return { error: "Login failed" };
-
-      // Load profile — if null, try to create one
-      let profile = await fetchProfile(data.user.id);
-      if (!profile) {
-        await supabase.from("users").insert({
-          supabase_uid: data.user.id,
-          email: data.user.email || email,
-          name: data.user.user_metadata?.name || email.split("@")[0],
-          role: "user",
-          kyc_status: "unverified",
-          is_active: true,
-        });
-        profile = await fetchProfile(data.user.id);
-      }
-
-      sessionRef.current = data.user.id;
-      setUser(profile);
-      return { error: null };
-    },
-    [fetchProfile]
-  );
-
-  const signUp = useCallback(
-    async (email: string, password: string, name?: string) => {
-      if (!isConfigured) return { error: "Supabase not configured" };
-
-      const { data: authData, error: authErr } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { name: name || email.split("@")[0] } },
-      });
-      if (authErr) return { error: authErr.message };
-      if (!authData.user) return { error: "Signup failed" };
-
-      // Create profile
+    // Load or create profile
+    let profile = await loadProfile(data.user.id);
+    if (!profile) {
       await supabase.from("users").insert({
-        supabase_uid: authData.user.id,
-        email,
-        name: name || email.split("@")[0],
+        supabase_uid: data.user.id,
+        email: data.user.email || email,
+        name: data.user.user_metadata?.name || email.split("@")[0],
         role: "user",
         kyc_status: "unverified",
         is_active: true,
       });
+      profile = await loadProfile(data.user.id);
+    }
 
-      // Auto sign in
-      const { data: signInData, error: signInErr } =
-        await supabase.auth.signInWithPassword({ email, password });
+    _setUser(profile);
+    _setLoading(false);
+    return { error: null };
+  }, []);
 
-      if (signInErr) return { error: signInErr.message };
+  const signUp = useCallback(async (email: string, password: string, name?: string) => {
+    if (!isConfigured) return { error: "Supabase not configured" };
+    _setLoading(true);
 
-      if (signInData.user) {
-        const profile = await fetchProfile(signInData.user.id);
-        sessionRef.current = signInData.user.id;
-        setUser(profile);
-      }
-      return { error: null };
-    },
-    [fetchProfile]
-  );
+    const { data: authData, error: authErr } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { name: name || email.split("@")[0] } },
+    });
+
+    if (authErr) {
+      _setLoading(false);
+      return { error: authErr.message };
+    }
+    if (!authData.user) {
+      _setLoading(false);
+      return { error: "Signup failed" };
+    }
+
+    // Create profile
+    await supabase.from("users").insert({
+      supabase_uid: authData.user.id,
+      email,
+      name: name || email.split("@")[0],
+      role: "user",
+      kyc_status: "unverified",
+      is_active: true,
+    });
+
+    // Auto sign in
+    const { data: signInData, error: signInErr } =
+      await supabase.auth.signInWithPassword({ email, password });
+
+    if (signInErr) {
+      _setLoading(false);
+      return { error: signInErr.message };
+    }
+
+    if (signInData.user) {
+      const profile = await loadProfile(signInData.user.id);
+      _setUser(profile);
+    }
+    _setLoading(false);
+    return { error: null };
+  }, []);
 
   const logout = useCallback(async () => {
     if (isConfigured) await supabase.auth.signOut();
-    sessionRef.current = null;
-    setUser(null);
+    _setUser(null);
     window.location.replace("#/login");
   }, []);
 
   return {
-    user,
-    isAuthenticated: !!user,
-    isAdmin: user?.isAdmin || false,
-    isLoading,
+    user: _user,
+    isAuthenticated: !!_user,
+    isAdmin: _user?.isAdmin || false,
+    isLoading: _loading,
     configError: isConfigured ? "" : "Supabase not configured",
     signIn,
     signUp,
