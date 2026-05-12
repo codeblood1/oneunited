@@ -375,44 +375,64 @@ export function useKyc() {
 // FILE UPLOAD
 // ============================================================
 export async function uploadKycDocument(file: File, type: "front" | "back") {
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) throw new Error("Not authenticated");
+  try {
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) throw new Error("Not authenticated");
 
-  const fileExt = file.name.split(".").pop() || "jpg";
-  const fileName = `kyc/${userData.user.id}/${type}_${Date.now()}.${fileExt}`;
+    const fileExt = file.name.split(".").pop() || "jpg";
+    const fileName = `kyc/${userData.user.id}/${type}_${Date.now()}.${fileExt}`;
 
-  const { error: uploadErr } = await supabase.storage
-    .from("documents")
-    .upload(fileName, file, { contentType: file.type });
+    const { error: uploadErr } = await supabase.storage
+      .from("documents")
+      .upload(fileName, file, { contentType: file.type });
 
-  if (uploadErr) throw uploadErr;
+    if (uploadErr) {
+      if (uploadErr.message?.includes("bucket") || uploadErr.message?.includes("Not found")) {
+        throw new Error("Storage bucket not found. Create 'documents' bucket in Supabase Storage.");
+      }
+      throw new Error(`Upload failed: ${uploadErr.message}`);
+    }
 
-  const { data: { publicUrl } } = supabase.storage.from("documents").getPublicUrl(fileName);
-  return publicUrl;
+    const { data: { publicUrl } } = supabase.storage.from("documents").getPublicUrl(fileName);
+    return publicUrl;
+  } catch (err: any) {
+    if (err.message?.includes("Storage bucket")) throw err;
+    throw new Error(err.message || "Document upload failed");
+  }
 }
 
 export async function uploadAvatar(file: File) {
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) throw new Error("Not authenticated");
+  try {
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) throw new Error("Not authenticated");
 
-  const fileExt = file.name.split(".").pop() || "jpg";
-  const fileName = `avatars/${userData.user.id}.${fileExt}`;
+    const fileExt = file.name.split(".").pop() || "jpg";
+    const fileName = `avatars/${userData.user.id}.${fileExt}`;
 
-  const { error: uploadErr } = await supabase.storage
-    .from("documents")
-    .upload(fileName, file, { contentType: file.type, upsert: true });
+    const { error: uploadErr } = await supabase.storage
+      .from("documents")
+      .upload(fileName, file, { contentType: file.type, upsert: true });
 
-  if (uploadErr) throw uploadErr;
+    if (uploadErr) {
+      if (uploadErr.message?.includes("bucket") || uploadErr.message?.includes("Not found")) {
+        throw new Error("Storage bucket not found. Create 'documents' bucket in Supabase Storage.");
+      }
+      throw new Error(`Upload failed: ${uploadErr.message}`);
+    }
 
-  const { data: { publicUrl } } = supabase.storage.from("documents").getPublicUrl(fileName);
+    const { data: { publicUrl } } = supabase.storage.from("documents").getPublicUrl(fileName);
 
-  // Update user avatar
-  const { data: userRow } = await supabase.from("users").select("id").eq("supabase_uid", userData.user.id).single();
-  if (userRow) {
-    await supabase.from("users").update({ avatar: publicUrl }).eq("id", userRow.id);
+    // Update user avatar
+    const { data: userRow } = await supabase.from("users").select("id").eq("supabase_uid", userData.user.id).single();
+    if (userRow) {
+      await supabase.from("users").update({ avatar: publicUrl }).eq("id", userRow.id);
+    }
+
+    return publicUrl;
+  } catch (err: any) {
+    if (err.message?.includes("Storage bucket")) throw err;
+    throw new Error(err.message || "Avatar upload failed");
   }
-
-  return publicUrl;
 }
 
 // ============================================================
@@ -705,5 +725,35 @@ export function useAdminAccounts() {
     }
   }, []);
 
-  return { accounts, isLoading, fetchAccounts };
+  const updateBalance = useCallback(async (accountId: number, amount: number, type: "credit" | "debit") => {
+    const { data: account } = await supabase.from("bank_accounts").select("balance,user_id").eq("id", accountId).single();
+    if (!account) throw new Error("Account not found");
+
+    const currentBalance = parseFloat(account.balance as string) || 0;
+    const newBalance = type === "credit" ? currentBalance + amount : currentBalance - amount;
+    if (type === "debit" && newBalance < 0) throw new Error("Insufficient balance");
+
+    const { error: updErr } = await supabase.from("bank_accounts")
+      .update({ balance: newBalance.toFixed(2) })
+      .eq("id", accountId);
+    if (updErr) throw new Error(updErr.message);
+
+    // Record the transaction
+    const { error: txErr } = await supabase.from("transactions").insert({
+      user_id: account.user_id,
+      from_account_id: accountId,
+      type: type === "credit" ? "deposit" : "withdrawal",
+      amount: amount.toFixed(2),
+      description: `Admin ${type}: ${amount.toFixed(2)}`,
+      status: "completed",
+    });
+    if (txErr) throw new Error(txErr.message);
+  }, []);
+
+  const toggleAccount = useCallback(async (accountId: number, isActive: boolean) => {
+    const { error: err } = await supabase.from("bank_accounts").update({ is_active: !isActive }).eq("id", accountId);
+    if (err) throw new Error(err.message);
+  }, []);
+
+  return { accounts, isLoading, fetchAccounts, updateBalance, toggleAccount };
 }

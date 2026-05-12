@@ -40,11 +40,21 @@ export default function Verification() {
     if (!idNumber) { toast.error("ID number is required"); return; }
     setIsSubmitting(true);
 
+    let frontUrl = "";
+    let backUrl = "";
     try {
-      let frontUrl = "";
-      let backUrl = "";
-      if (frontFile) { toast.loading("Uploading front document..."); frontUrl = await uploadKycDocument(frontFile, "front"); toast.dismiss(); }
-      if (backFile) { toast.loading("Uploading back document..."); backUrl = await uploadKycDocument(backFile, "back"); toast.dismiss(); }
+      if (frontFile) {
+        toast.loading("Uploading front document...");
+        try { frontUrl = await uploadKycDocument(frontFile, "front"); }
+        catch (upErr: any) { toast.dismiss(); toast.error(`Front upload failed: ${upErr.message}`); setIsSubmitting(false); return; }
+        toast.dismiss();
+      }
+      if (backFile) {
+        toast.loading("Uploading back document...");
+        try { backUrl = await uploadKycDocument(backFile, "back"); }
+        catch (upErr: any) { toast.dismiss(); toast.error(`Back upload failed: ${upErr.message}`); setIsSubmitting(false); return; }
+        toast.dismiss();
+      }
 
       const result = await submitKyc({ idType, idNumber, address, city, state, zipCode, country, frontImageUrl: frontUrl || undefined, backImageUrl: backUrl || undefined });
       if (result.success) { setStep("submitted"); toast.success("Verification submitted successfully"); }
