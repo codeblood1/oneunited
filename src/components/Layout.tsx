@@ -27,7 +27,6 @@ const adminNavItems = [
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, isAdmin, logout } = useAuth();
   const location = useLocation();
-  const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -44,8 +43,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const isAdminRoute = location.pathname.startsWith("/admin");
   const navItems = isAdminRoute ? adminNavItems : userNavItems;
-  const initials = (user.name || "User").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
-  const avatarUrl = user.avatar;
+  const initials = (user?.name || "User").split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
+  const avatarUrl = user?.avatar;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white flex">
@@ -100,8 +99,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate dark:text-white">{user.name || "User"}</p>
-              <p className="text-xs text-slate-400 truncate">{user.email || ""}</p>
+              <p className="text-sm font-medium truncate dark:text-white">{user?.name || "User"}</p>
+              <p className="text-xs text-slate-400 truncate">{user?.email || ""}</p>
             </div>
           </div>
           <button onClick={logout} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
@@ -137,9 +136,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               {avatarUrl ? <img src={avatarUrl} alt="" className="w-11 h-11 rounded-full object-cover" /> : <span className="text-amber-700 dark:text-amber-400 font-bold text-sm">{initials}</span>}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold truncate dark:text-white">{user.name || "User"}</p>
-              <p className="text-xs text-slate-400 truncate">{user.email || ""}</p>
-              {user.isAdmin && <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-medium">Admin</span>}
+              <p className="text-sm font-semibold truncate dark:text-white">{user?.name || "User"}</p>
+              <p className="text-xs text-slate-400 truncate">{user?.email || ""}</p>
+              {user?.isAdmin && <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-medium">Admin</span>}
             </div>
           </div>
         </div>
