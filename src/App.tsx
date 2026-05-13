@@ -15,6 +15,8 @@ import AdminUsers from "./pages/AdminUsers";
 import AdminTransactions from "./pages/AdminTransactions";
 import AdminKYC from "./pages/AdminKYC";
 import AdminAccounts from "./pages/AdminAccounts";
+import AdminCards from "./pages/AdminCards";
+import Cards from "./pages/Cards";
 import NotFound from "./pages/NotFound";
 
 function AuthLoader() {
@@ -92,11 +94,13 @@ export default function App() {
         <Route path="/transfer" element={<ProtectedRoute><Transfer /></ProtectedRoute>} />
         <Route path="/verification" element={<ProtectedRoute><Verification /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+        <Route path="/cards" element={<ProtectedRoute><Cards /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
         <Route path="/admin/users" element={<ProtectedRoute adminOnly><AdminUsers /></ProtectedRoute>} />
         <Route path="/admin/transactions" element={<ProtectedRoute adminOnly><AdminTransactions /></ProtectedRoute>} />
         <Route path="/admin/kyc" element={<ProtectedRoute adminOnly><AdminKYC /></ProtectedRoute>} />
         <Route path="/admin/accounts" element={<ProtectedRoute adminOnly><AdminAccounts /></ProtectedRoute>} />
+        <Route path="/admin/cards" element={<ProtectedRoute adminOnly><AdminCards /></ProtectedRoute>} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </ErrorBoundary>

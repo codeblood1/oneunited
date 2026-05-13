@@ -204,7 +204,6 @@ export function useTransactions() {
     toAccountNumber,
     amount,
     description,
-    recipientBankId,
     recipientBankName,
     recipientBankCountry,
     recipientSwift,
@@ -227,19 +226,26 @@ export function useTransactions() {
       const { data: userRow } = await supabase.from("users").select("id").eq("supabase_uid", userData.user.id).single();
       if (!userRow) throw new Error("User not found");
 
-      const fromAcc = await supabase.from("bank_accounts").select("balance").eq("id", fromAccountId).single();
-      if (!fromAcc.data) throw new Error("Source account not found");
-      if (parseFloat(fromAcc.data.balance as string) < parseFloat(amount)) {
-        throw new Error("Insufficient balance");
-      }
+      const { data: fromAcc } = await supabase.from("bank_accounts").select("balance").eq("id", fromAccountId).single();
+      if (!fromAcc) throw new Error("Source account not found");
 
+      const currentBal = parseFloat(fromAcc.balance as string) || 0;
+      const transferAmt = parseFloat(amount);
+      if (currentBal < transferAmt) throw new Error("Insufficient balance");
+
+      // Deduct balance from source account
+      const newBalance = (currentBal - transferAmt).toFixed(2);
+      const { error: balErr } = await supabase.from("bank_accounts").update({ balance: newBalance }).eq("id", fromAccountId);
+      if (balErr) throw new Error("Failed to update balance: " + balErr.message);
+
+      // Create transaction record
       const { error: err } = await supabase.from("transactions").insert({
         user_id: userRow.id,
         from_account_id: fromAccountId,
         type: "transfer",
         amount,
         description: description || `Transfer to ${toAccountNumber}`,
-        status: "pending",
+        status: "completed",
         recipient_bank_name: recipientBankName,
         recipient_bank_country: recipientBankCountry,
         recipient_swift: recipientSwift,
@@ -369,6 +375,126 @@ export function useKyc() {
   }, [fetchKyc]);
 
   return { kycData, isLoading, error, submitKyc, refresh: fetchKyc };
+}
+
+// ============================================================
+// CARD REQUESTS
+// ============================================================
+export type CardType = "visa_debit" | "mastercard_debit" | "virtual";
+
+export type CardRequest = {
+  id: number;
+  user_id: number;
+  card_type: CardType;
+  cardholder_name: string;
+  status: "pending" | "approved" | "rejected";
+  card_number: string | null;
+  expiry_date: string | null;
+  cvv: string | null;
+  admin_note: string | null;
+  created_at: string;
+  approved_at: string | null;
+};
+
+export function useCardRequests() {
+  const [cards, setCards] = useState<CardRequest[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchCards = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) { setCards([]); setIsLoading(false); return; }
+      const { data: userRow } = await supabase.from("users").select("id").eq("supabase_uid", userData.user.id).single();
+      if (!userRow) { setCards([]); setIsLoading(false); return; }
+      const { data, error: err } = await supabase.from("card_requests").select("*").eq("user_id", userRow.id).order("created_at", { ascending: false });
+      if (err) throw err;
+      setCards(data || []);
+    } catch {
+      setCards([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchCards(); }, [fetchCards]);
+
+  const requestCard = useCallback(async (cardType: CardType, cardholderName: string) => {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) throw new Error("Not authenticated");
+      const { data: userRow } = await supabase.from("users").select("id").eq("supabase_uid", userData.user.id).single();
+      if (!userRow) throw new Error("User not found");
+
+      // Check if user already has a pending request for this card type
+      const { data: existing } = await supabase.from("card_requests")
+        .select("id").eq("user_id", userRow.id).eq("card_type", cardType).eq("status", "pending").maybeSingle();
+      if (existing) throw new Error("You already have a pending request for this card type");
+
+      const { error: err } = await supabase.from("card_requests").insert({
+        user_id: userRow.id,
+        card_type: cardType,
+        cardholder_name: cardholderName,
+        status: "pending",
+      });
+      if (err) throw err;
+      await fetchCards();
+      return { success: true, error: null };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }, [fetchCards]);
+
+  return { cards, isLoading, requestCard, refresh: fetchCards };
+}
+
+// Admin card management
+export function useAdminCards() {
+  const [cardRequests, setCardRequests] = useState<CardRequest[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchCardRequests = useCallback(async (status?: string, limit = 100) => {
+    setIsLoading(true);
+    try {
+      let query = supabase.from("card_requests").select("*").order("created_at", { ascending: false }).limit(limit);
+      if (status && status !== "all") query = query.eq("status", status);
+      const { data, error: err } = await query;
+      if (err) throw err;
+      setCardRequests(data || []);
+    } catch {
+      setCardRequests([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const approveCard = useCallback(async (cardId: number, adminNote?: string) => {
+    // Generate card details
+    const cardNumber = Array.from({ length: 16 }, () => Math.floor(Math.random() * 10)).join("").replace(/(.{4})/g, "$1 ").trim();
+    const expiryDate = new Date(Date.now() + 3 * 365 * 24 * 60 * 60 * 1000).toLocaleDateString("en-US", { month: "2-digit", year: "2-digit" });
+    const cvv = String(Math.floor(100 + Math.random() * 900));
+
+    const { error: err } = await supabase.from("card_requests").update({
+      status: "approved",
+      card_number: cardNumber,
+      expiry_date: expiryDate,
+      cvv,
+      admin_note: adminNote || null,
+      approved_at: new Date().toISOString(),
+    }).eq("id", cardId);
+
+    if (err) throw new Error(err.message);
+  }, []);
+
+  const rejectCard = useCallback(async (cardId: number, adminNote?: string) => {
+    const { error: err } = await supabase.from("card_requests").update({
+      status: "rejected",
+      admin_note: adminNote || null,
+    }).eq("id", cardId);
+    if (err) throw new Error(err.message);
+  }, []);
+
+  return { cardRequests, isLoading, fetchCardRequests, approveCard, rejectCard };
 }
 
 // ============================================================

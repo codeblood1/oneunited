@@ -1,15 +1,32 @@
+import { useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import { useTransactions } from "@/hooks/useSupabaseData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Receipt, Clock,
+  ArrowDownLeft, ArrowUpRight, ArrowLeftRight, Receipt,
+  Printer, X, Download, Landmark, Calendar, Hash, FileText,
 } from "lucide-react";
 
+type Tx = {
+  id: number;
+  type: string;
+  amount: string | number;
+  description: string | null;
+  status: string;
+  created_at: string;
+  recipient_bank_name?: string;
+  from_account_id: number | null;
+};
+
 export default function Transactions() {
+  const { user } = useAuth();
   const { transactions, isLoading } = useTransactions();
+  const [printTx, setPrintTx] = useState<Tx | null>(null);
 
   const formatCurrency = (amount: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
-  const formatDate = (date: Date | string) => new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const formatDate = (date: string) => new Date(date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const formatDateShort = (date: string) => new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -21,11 +38,16 @@ export default function Transactions() {
     }
   };
 
+  const handlePrint = (tx: Tx) => {
+    setPrintTx(tx);
+    setTimeout(() => window.print(), 100);
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Transactions</h1>
-        <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">View all your banking activity</p>
+        <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">View and print receipts for your banking activity</p>
       </div>
 
       <Card className="border shadow-sm dark:border-slate-700">
@@ -36,10 +58,10 @@ export default function Transactions() {
         </CardHeader>
         <CardContent className="space-y-3">
           {isLoading ? (
-            [1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-20" />)
+            [1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-20 dark:bg-slate-700" />)
           ) : transactions.length > 0 ? (
             transactions.map((tx) => (
-              <div key={tx.id} className="flex items-center justify-between p-4 rounded-xl border border-slate-100 dark:border-slate-700 dark:bg-slate-800/30 hover:shadow-sm transition-all">
+              <div key={tx.id} className="flex items-center justify-between p-4 rounded-xl border border-slate-100 dark:border-slate-700 dark:bg-slate-800/30 hover:shadow-sm transition-all group">
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                     tx.type === "deposit" ? "bg-emerald-50 dark:bg-emerald-500/20" : tx.type === "withdrawal" ? "bg-rose-50 dark:bg-rose-500/20" : "bg-indigo-50 dark:bg-indigo-500/20"
@@ -51,32 +73,100 @@ export default function Transactions() {
                   <div>
                     <p className="text-sm font-medium text-slate-900 dark:text-white capitalize">{tx.description || tx.type}</p>
                     <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                      <span>{formatDate(tx.created_at)}</span>
+                      <span>{formatDateShort(tx.created_at)}</span>
                       {tx.recipient_bank_name && (
                         <><span className="text-slate-300 dark:text-slate-600">·</span><span>{tx.recipient_bank_name}</span></>
                       )}
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className={`text-sm font-semibold ${tx.type === "deposit" ? "text-emerald-600" : "text-rose-500"}`}>
-                    {tx.type === "deposit" ? "+" : "-"}{formatCurrency(typeof tx.amount === "string" ? parseFloat(tx.amount) : tx.amount || 0)}
-                  </p>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${getStatusColor(tx.status)}`}>
-                    {tx.status}
-                  </span>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className={`text-sm font-semibold ${tx.type === "deposit" ? "text-emerald-600" : "text-rose-500"}`}>
+                      {tx.type === "deposit" ? "+" : "-"}{formatCurrency(typeof tx.amount === "string" ? parseFloat(tx.amount) : tx.amount || 0)}
+                    </p>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${getStatusColor(tx.status)}`}>{tx.status}</span>
+                  </div>
+                  <button onClick={() => handlePrint(tx as Tx)}
+                    className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 opacity-0 group-hover:opacity-100 transition-all print:hidden"
+                    title="Print receipt">
+                    <Printer className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             ))
           ) : (
             <div className="text-center py-12">
-              <Clock className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+              <Receipt className="w-10 h-10 text-slate-400 mx-auto mb-3" />
               <p className="text-slate-500 dark:text-slate-400 text-sm">No transactions yet</p>
               <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Your banking activity will appear here</p>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Hidden print-only receipt */}
+      {printTx && (
+        <div className="hidden print:block fixed inset-0 bg-white z-50 p-8">
+          <div className="max-w-md mx-auto space-y-6">
+            {/* Header */}
+            <div className="text-center border-b-2 border-slate-900 pb-4">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <Landmark className="w-8 h-8 text-[#fbbf24]" />
+                <span className="text-2xl font-bold text-slate-900">OneUnited Bank</span>
+              </div>
+              <p className="text-sm text-slate-500">Official Transaction Receipt</p>
+            </div>
+
+            {/* Receipt Details */}
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500 flex items-center gap-1"><Hash className="w-3.5 h-3.5" />Receipt No</span>
+                <span className="text-sm font-mono font-medium">TXN-{String(printTx.id).padStart(8, "0")}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500 flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />Date</span>
+                <span className="text-sm font-medium">{formatDate(printTx.created_at)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500 flex items-center gap-1"><FileText className="w-3.5 h-3.5" />Type</span>
+                <span className="text-sm font-medium capitalize">{printTx.type}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500 flex items-center gap-1"><FileText className="w-3.5 h-3.5" />Description</span>
+                <span className="text-sm font-medium">{printTx.description || printTx.type}</span>
+              </div>
+              {printTx.recipient_bank_name && (
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-slate-500 flex items-center gap-1"><Landmark className="w-3.5 h-3.5" />Recipient Bank</span>
+                  <span className="text-sm font-medium">{printTx.recipient_bank_name}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-500 flex items-center gap-1"><FileText className="w-3.5 h-3.5" />Status</span>
+                <span className="text-sm font-medium capitalize">{printTx.status}</span>
+              </div>
+            </div>
+
+            {/* Amount */}
+            <div className="border-t-2 border-b-2 border-slate-900 py-4 text-center">
+              <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">Amount</p>
+              <p className={`text-3xl font-bold ${printTx.type === "deposit" ? "text-emerald-600" : "text-slate-900"}`}>
+                {printTx.type === "deposit" ? "+" : "-"}{formatCurrency(typeof printTx.amount === "string" ? parseFloat(printTx.amount) : printTx.amount || 0)}
+              </p>
+            </div>
+
+            {/* Footer */}
+            <div className="text-center space-y-2">
+              <p className="text-xs text-slate-500">This is an official receipt from OneUnited Bank.</p>
+              <p className="text-xs text-slate-500">For inquiries, contact support@oneunited.bank</p>
+              <div className="pt-4 border-t border-dashed border-slate-300">
+                <p className="text-xs text-slate-400">Printed on {new Date().toLocaleString()}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

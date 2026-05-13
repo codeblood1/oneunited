@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   LayoutDashboard, Wallet, ArrowLeftRight, ShieldCheck, Settings,
   LogOut, Menu, X, ChevronRight, Users, Receipt, UserCheck,
-  BarChart3, Landmark,
+  BarChart3, Landmark, CreditCard,
 } from "lucide-react";
 
 const userNavItems = [
@@ -12,6 +12,7 @@ const userNavItems = [
   { label: "Accounts", path: "/accounts", icon: Wallet },
   { label: "Transactions", path: "/transactions", icon: Receipt },
   { label: "Transfer", path: "/transfer", icon: ArrowLeftRight },
+  { label: "Cards", path: "/cards", icon: CreditCard },
   { label: "Verify", path: "/verification", icon: ShieldCheck },
   { label: "Settings", path: "/settings", icon: Settings },
 ];
@@ -22,6 +23,7 @@ const adminNavItems = [
   { label: "Transactions", path: "/admin/transactions", icon: Receipt },
   { label: "KYC", path: "/admin/kyc", icon: UserCheck },
   { label: "Accounts", path: "/admin/accounts", icon: Landmark },
+  { label: "Cards", path: "/admin/cards", icon: CreditCard },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
